@@ -8,9 +8,11 @@
   "inline_diff": true,
   "max_diff_bytes": 150000,
   "max_diff_files": 80,
-  "side_by_side": true,
+  "side_by_side": false,
   "sxs_max_files": 25,
   "sxs_max_file_bytes": 100000,
+  "integration_api": "integration_api.py",
+  "integration_func": "integration_status",
   "watch_folders": [
     {
       "name": "myproject branches",

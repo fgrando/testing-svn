@@ -12,7 +12,10 @@ Python 3.9+, standard library only. `svn` must be on PATH.
 import argparse
 import difflib
 import html
+import importlib
+import importlib.util
 import json
+import os
 import subprocess
 import sys
 import webbrowser
@@ -341,6 +344,9 @@ h1 { font-size: 20px; margin: 0 0 4px; }
 .commit:first-of-type { border-top: none; }
 .chead { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 13px; }
 .rev { font-weight: 700; }
+.ist { display: inline-block; min-width: 14px; text-align: center; font-weight: 700;
+       cursor: default; }
+.ist-pass { color: #1a7f37; } .ist-fail { color: #cf222e; } .ist-na { color: #9aa0a8; }
 .rev a { text-decoration: none; color: #1b66c9; }
 .author { color: #3a4250; }
 .date { color: #8a929e; }
@@ -407,6 +413,24 @@ table.diff td.diff_next a { color: #8a929e; text-decoration: none; }
 """
 
 BADGE_CLASSES = {"A": "A", "M": "M", "D": "D", "R": "R"}
+
+# glyph, css class, tooltip
+STATUS_MARK = {
+    "pass": ("&#10004;", "ist-pass", "Integration: pass"),
+    "fail": ("&#10008;", "ist-fail", "Integration: fail"),
+    "notfound": ("?", "ist-na", "Integration: not found"),
+    "error": ("?", "ist-na", "Integration check error"),
+}
+
+
+def render_status(c):
+    st = c.get("integration")
+    if not st:
+        return ""
+    glyph, cls, title = STATUS_MARK.get(st, STATUS_MARK["notfound"])
+    if st == "error" and c.get("integration_error"):
+        title = "Integration check error: " + c["integration_error"]
+    return "<span class='ist %s' title='%s'>%s</span>" % (cls, esc(title), glyph)
 
 
 def esc(s):
@@ -513,6 +537,7 @@ def render_commit(repo, root, c):
     return (
         "<div class='commit'>"
         "<div class='chead'>"
+        "%s"
         "<span class='rev'>%s</span>"
         "<span class='author'>%s</span>"
         "<span class='date'>%s</span>"
@@ -523,7 +548,7 @@ def render_commit(repo, root, c):
         "%s"
         "<span class='cmd'>%s</span>"
         "</div>"
-    ) % (rev_html, esc(c["author"]), esc(fmt_date(c["date"])),
+    ) % (render_status(c), rev_html, esc(c["author"]), esc(fmt_date(c["date"])),
          msg, "".join(rows), render_diff(c), render_sxs(c), esc(diff_cmd))
 
 
@@ -628,13 +653,42 @@ def repo_key(repo):
     return repo.get("name") or repo["url"]
 
 
+def load_integration(cfg, config_path):
+    """Load the integration-status callable from a module name or .py file.
+
+    Returns a callable status(repo_url, revision) -> 'pass'|'fail'|'notfound',
+    or None if not configured / not loadable (feature is then skipped)."""
+    spec = cfg.get("integration_api")
+    if not spec:
+        return None
+    func_name = cfg.get("integration_func", "integration_status")
+    try:
+        if spec.endswith(".py") or "/" in spec or "\\" in spec:
+            cfg_dir = os.path.dirname(os.path.abspath(config_path))
+            here = os.path.dirname(os.path.abspath(__file__))
+            path = next((p for p in (spec, os.path.join(cfg_dir, spec),
+                                     os.path.join(here, spec)) if os.path.exists(p)), None)
+            if not path:
+                raise FileNotFoundError(spec)
+            mspec = importlib.util.spec_from_file_location("svnwatch_integration", path)
+            mod = importlib.util.module_from_spec(mspec)
+            mspec.loader.exec_module(mod)
+        else:
+            mod = importlib.import_module(spec)
+        return getattr(mod, func_name)
+    except Exception as exc:                       # user-provided code; stay resilient
+        print("Integration API not loaded (%s): %s" % (spec, exc), file=sys.stderr)
+        return None
+
+
 # --------------------------------------------------------------------------- #
 # main
 # --------------------------------------------------------------------------- #
 
 def collect(cfg, state, first_run_limit, inline_diff=True,
             max_diff_bytes=150000, max_diff_files=80,
-            side_by_side=False, sxs_max_files=25, sxs_max_file_bytes=100000):
+            side_by_side=False, sxs_max_files=25, sxs_max_file_bytes=100000,
+            integration_fn=None):
     sections = []
     new_state = dict(state)
     for repo in cfg["repos"]:
@@ -658,6 +712,15 @@ def collect(cfg, state, first_run_limit, inline_diff=True,
                     attach_diff(cfg, repo, c, max_diff_bytes, max_diff_files)
                 if want_sxs:
                     attach_sxs(cfg, repo, root, c, sxs_max_files, sxs_max_file_bytes)
+                if integration_fn is not None:
+                    try:
+                        st = integration_fn(repo["url"], c["rev"])
+                    except Exception as exc:       # user code; never break the report
+                        c["integration"] = "error"
+                        c["integration_error"] = str(exc)
+                    else:
+                        c["integration"] = st if st in ("pass", "fail", "notfound") \
+                            else "notfound"
             section["commits"] = commits
             new_state[key] = head
         except SvnError as exc:
@@ -686,6 +749,8 @@ def main(argv=None):
                     help="embed full side-by-side file comparisons (overrides config)")
     ap.add_argument("--no-side-by-side", action="store_true",
                     help="disable side-by-side comparisons (overrides config)")
+    ap.add_argument("--no-integration", action="store_true",
+                    help="skip integration-status lookups (overrides config)")
     ap.add_argument("--dry-run", action="store_true",
                     help="do not update the state file")
     ap.add_argument("-q", "--quiet", action="store_true")
@@ -721,9 +786,11 @@ def main(argv=None):
     sxs_max_files = cfg.get("sxs_max_files", 25)
     sxs_max_file_bytes = cfg.get("sxs_max_file_bytes", 100000)
 
+    integration_fn = None if args.no_integration else load_integration(cfg, args.config)
+
     sections, new_repo_state = collect(
         cfg, repo_state, first_run_limit, inline_diff, max_diff_bytes, max_diff_files,
-        side_by_side, sxs_max_files, sxs_max_file_bytes)
+        side_by_side, sxs_max_files, sxs_max_file_bytes, integration_fn)
     folder_sections, new_folder_state = collect_folders(cfg, folder_state)
 
     report_dir = Path(cfg.get("report_dir", "reports"))
