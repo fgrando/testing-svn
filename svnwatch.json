@@ -1,0 +1,43 @@
+{
+  "svn": "svn",
+  "global_svn_args": [
+    "--non-interactive"
+  ],
+  "report_dir": "reports",
+  "first_run_limit": 20,
+  "inline_diff": true,
+  "max_diff_bytes": 150000,
+  "max_diff_files": 80,
+  "side_by_side": true,
+  "sxs_max_files": 25,
+  "sxs_max_file_bytes": 100000,
+  "watch_folders": [
+    {
+      "name": "myproject branches",
+      "url": "http://192.168.1.228/svn/myproject/branches",
+      "web_revision": "http://192.168.1.228/websvn/revision.php?repname=myproject&rev={rev}",
+      "web_folder": "http://192.168.1.228/websvn/listing.php?repname=myproject&path={path}&rev={rev}",
+      "username": null,
+      "password": null
+    }
+  ],
+  "repos": [
+    {
+      "name": "Apache ASF",
+      "url": "https://svn.apache.org/repos/asf/"
+    },
+    {
+      "name": "Other apache",
+      "url": "http://svn.apache.org/repos/asf/gora/trunk"
+    },
+    {
+      "name": "my project",
+      "url": "http://192.168.1.228/svn/myproject/trunk",
+      "web_revision": "http://192.168.1.228/websvn/revision.php?repname=myproject&rev={rev}",
+      "web_file": "http://192.168.1.228/websvn/filedetails.php?repname=myproject&path={path}&rev={rev}",
+      "username": null,
+      "password": null,
+      "web_diff": "http://192.168.1.228/websvn/diff.php?repname=myproject&path={path}&rev={rev}"
+    }
+  ]
+}

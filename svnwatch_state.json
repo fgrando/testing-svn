@@ -1,0 +1,13 @@
+{
+  "folders": {
+    "myproject branches": [
+      "feature-multiply",
+      "feature-subtract"
+    ]
+  },
+  "repos": {
+    "Apache ASF": 1935530,
+    "Other apache": 1935530,
+    "my project": 10
+  }
+}
